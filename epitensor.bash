@@ -1,0 +1,85 @@
+#!/bin/bash
+##### Usage: ./epitensor.bash -f $datamatrixfile -h $annofile -o $outpath -w $workpath -g $genome -c $chr
+
+set -o errexit;
+
+##### check for dependencies #####
+command -v macs2 >/dev/null 2>&1 || { echo "macs2 not installed. Check here https://github.com/taoliu/MACS/wiki/Install-macs2 ... Aborting." >&2; exit 1; }
+
+
+
+scriptpath="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )";
+cd $scriptpath;
+
+datamatrixfile="";
+annofile="";
+outpath="";
+workpath="";
+genome="";
+chr="";
+
+while [[ $# > 1 ]]
+do
+key="$1"
+shift
+
+case $key in
+    -f|--datamatrix)
+    datamatrixfile="$1"
+    shift
+    ;;
+    -h|--anno)
+    annofile="$1"
+    shift
+    ;;
+    -o|--outpath)
+    outpath="$1"
+    shift
+    ;;
+    -w|--workpath)
+    workpath="$1"
+    shift
+    ;;
+    -g|--genome)
+    genome="$1"
+    shift
+    ;;
+    -c|--chr)
+    chr="$1"
+    shift
+    ;;
+    *)
+            # unknown option
+    ;;
+esac
+done
+
+
+# validate arguments
+arglistfile=$workpath"/arglist.txt";
+if [ -e $workpath ]; then
+  mkdir --parent $workpath;
+fi
+Rscript "validateEpitensorArgs.r" -datamatrix=$datamatrixfile -anno=$annofile -outpath=$outpath -workpath=$workpath -Genome=$genome -chr=$chr -scriptpath=$scriptpath -arglistfile=$arglistfile;
+
+if [ -e $arglistfile ]; then
+  Rscript "getinput.r" -arglistfile=$arglistfile;
+  $scriptpath"/run_mpca.bash" $arglistfile;
+  Rscript "mat2bedgraph.r" -arglistfile=$arglistfile;
+  Rscript "est_bkgd_lambda.r" -arglistfile=$arglistfile;
+  perl run_macs2bdgpeakcall.pl $arglistfile;
+  perl peak_anno.pl $arglistfile;
+  Rscript "peakToPairs.r" -arglistfile=$arglistfile;
+  echo $arglistfile;
+  perl mergepair.pl $arglistfile;
+
+  $scriptpath"/extract_tss_tss_pairs.bash" -a $arglistfile;
+  $scriptpath"/extract_tss_enh_pairs.bash" -a $arglistfile;
+  $scriptpath"/extract_enh_enh_pairs.bash" -a $arglistfile;
+fi
+
+# remove workpath
+if [ -e $workpath ]; then
+ rm -r -f $workpath;
+fi
+
